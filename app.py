@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template_string
 import hmac
 import hashlib
 import base64
@@ -15,7 +15,7 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# Configurar logging SIMPLE
+# Configurar logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
@@ -155,8 +155,8 @@ def order_updated():
     fulfillment_status = orden['fulfillment_status']
     customer_email = orden['customer']['email'] if orden.get('customer') else 'Sin email'
     total = orden['total_price']
+    tags = orden.get('tags', '')
     
-    # LOGS DETALLADOS
     logger.info("="*60)
     logger.info(f"🔄 ORDEN ACTUALIZADA")
     logger.info(f"   Número: #{order_number}")
@@ -164,9 +164,59 @@ def order_updated():
     logger.info(f"   Total: ${total}")
     logger.info(f"   Estado de pago: {financial_status}")
     logger.info(f"   Estado de envío: {fulfillment_status}")
+    if tags:
+        logger.info(f"   Tags: {tags}")
     logger.info("="*60)
     
-    # DETECCIÓN 1: Devolución
+    # DETECCIÓN 1: Asignado a mensajero
+    if 'asignado a mensajero' in tags.lower():
+        logger.info(f"   🚚 ASIGNADO A MENSAJERO")
+        
+        asunto = f"🚚 Orden asignada a mensajero - #{order_number}"
+        cuerpo = f"""
+        <html>
+            <body style="font-family: Arial; font-size: 14px; color: #333;">
+                <h2 style="color: #3498db;">¡Orden Asignada a Mensajero!</h2>
+                
+                <p><strong>Número de orden:</strong> #{order_number}</p>
+                <p><strong>Cliente:</strong> {customer_email}</p>
+                <p style="color: blue;"><strong>🚚 Tu orden ha sido asignada a un mensajero</strong></p>
+                
+                <p>Tu paquete está en proceso de entrega.</p>
+                
+                <hr>
+                <p><small>Esta es una notificación automática de tu servidor de webhooks Amarela.</small></p>
+            </body>
+        </html>
+        """
+        
+        enviar_email(asunto, cuerpo)
+
+    # DETECCIÓN 2: En ruta de entrega
+    if 'en ruta de entrega' in tags.lower():
+        logger.info(f"   📍 EN RUTA DE ENTREGA")
+        
+        asunto = f"📍 Orden en ruta de entrega - #{order_number}"
+        cuerpo = f"""
+        <html>
+            <body style="font-family: Arial; font-size: 14px; color: #333;">
+                <h2 style="color: #9b59b6;">¡Tu Orden Está en Ruta!</h2>
+                
+                <p><strong>Número de orden:</strong> #{order_number}</p>
+                <p><strong>Cliente:</strong> {customer_email}</p>
+                <p style="color: purple;"><strong>📍 Tu paquete está en ruta de entrega</strong></p>
+                
+                <p>¡Pronto llegará a tu domicilio!</p>
+                
+                <hr>
+                <p><small>Esta es una notificación automática de tu servidor de webhooks Amarela.</small></p>
+            </body>
+        </html>
+        """
+        
+        enviar_email(asunto, cuerpo)
+    
+    # DETECCIÓN 3: Devolución
     if financial_status == 'refunded':
         logger.info(f"   ⚠️ DEVOLUCIÓN DETECTADA")
         
@@ -191,9 +241,9 @@ def order_updated():
         
         enviar_email(asunto, cuerpo)
     
-    # DETECCIÓN 2: Pago completado
+    # DETECCIÓN 4: Pago completado
     if financial_status == 'paid':
-        logger.info(f"   ✅ PAGO RECIBIDO (Pago Contra Entrega confirmado)")
+        logger.info(f"   ✅ PAGO RECIBIDO")
         
         asunto = f"✅ Pago confirmado - Orden #{order_number}"
         cuerpo = f"""
@@ -216,21 +266,21 @@ def order_updated():
         
         enviar_email(asunto, cuerpo)
     
-    # DETECCIÓN 3: Envío completado
+    # DETECCIÓN 5: Envío completado
     if fulfillment_status == 'fulfilled':
-        logger.info(f"   🚚 ENVÍO COMPLETADO")
+        logger.info(f"   🎉 ENVÍO COMPLETADO")
         
-        asunto = f"🚚 Orden enviada - #{order_number}"
+        asunto = f"🎉 Orden entregada - #{order_number}"
         cuerpo = f"""
         <html>
             <body style="font-family: Arial; font-size: 14px; color: #333;">
-                <h2 style="color: #3498db;">¡Orden Enviada!</h2>
+                <h2 style="color: #2ecc71;">¡Orden Entregada!</h2>
                 
                 <p><strong>Número de orden:</strong> #{order_number}</p>
                 <p><strong>Cliente:</strong> {customer_email}</p>
-                <p style="color: blue;"><strong>🚚 Tu orden ha sido enviada</strong></p>
+                <p style="color: green;"><strong>🎉 Tu orden ha sido completamente entregada</strong></p>
                 
-                <p>Verifica tu email para el tracking y más detalles.</p>
+                <p>¡Gracias por tu compra!</p>
                 
                 <hr>
                 <p><small>Esta es una notificación automática de tu servidor de webhooks Amarela.</small></p>
@@ -283,11 +333,218 @@ def refund_created():
     return jsonify({'status': 'ok'}), 200
 
 
+@app.route('/dashboard', methods=['GET'])
+def dashboard():
+    """Página con botón para chequear órdenes estancadas"""
+    html = """
+    <!DOCTYPE html>
+    <html lang="es">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Dashboard - Amarela Webhooks</title>
+        <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            
+            body {
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                padding: 20px;
+            }
+            
+            .container {
+                background: white;
+                border-radius: 10px;
+                box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+                padding: 40px;
+                max-width: 500px;
+                width: 100%;
+            }
+            
+            h1 {
+                color: #333;
+                margin-bottom: 10px;
+                text-align: center;
+            }
+            
+            .subtitle {
+                color: #666;
+                text-align: center;
+                margin-bottom: 40px;
+                font-size: 14px;
+            }
+            
+            .status {
+                background: #f0f7ff;
+                border-left: 4px solid #2ecc71;
+                padding: 15px;
+                margin-bottom: 30px;
+                border-radius: 5px;
+            }
+            
+            .status.success {
+                border-left-color: #2ecc71;
+                color: #27ae60;
+            }
+            
+            .status.error {
+                border-left-color: #e74c3c;
+                background: #fadbd8;
+                color: #c0392b;
+            }
+            
+            .status.loading {
+                border-left-color: #f39c12;
+                background: #fef5e7;
+                color: #d68910;
+            }
+            
+            button {
+                width: 100%;
+                padding: 15px;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                border: none;
+                border-radius: 5px;
+                font-size: 16px;
+                font-weight: bold;
+                cursor: pointer;
+                transition: transform 0.2s, box-shadow 0.2s;
+            }
+            
+            button:hover:not(:disabled) {
+                transform: translateY(-2px);
+                box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+            }
+            
+            button:disabled {
+                opacity: 0.6;
+                cursor: not-allowed;
+            }
+            
+            .result {
+                margin-top: 30px;
+                padding: 20px;
+                background: #f8f9fa;
+                border-radius: 5px;
+                display: none;
+            }
+            
+            .result.show {
+                display: block;
+            }
+            
+            .result h3 {
+                color: #333;
+                margin-bottom: 10px;
+            }
+            
+            .result-content {
+                color: #555;
+                font-size: 14px;
+                line-height: 1.6;
+                max-height: 300px;
+                overflow-y: auto;
+            }
+            
+            .loading-spinner {
+                display: inline-block;
+                width: 20px;
+                height: 20px;
+                border: 3px solid #f3f3f3;
+                border-top: 3px solid #667eea;
+                border-radius: 50%;
+                animation: spin 1s linear infinite;
+                margin-right: 10px;
+            }
+            
+            @keyframes spin {
+                0% { transform: rotate(0deg); }
+                100% { transform: rotate(360deg); }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>📊 Dashboard Amarela</h1>
+            <p class="subtitle">Sistema de monitoreo de webhooks</p>
+            
+            <div class="status success">
+                ✅ Servidor activo y funcionando correctamente
+            </div>
+            
+            <button id="checkButton" onclick="checkStaleOrders()">
+                🔍 Chequear Órdenes Estancadas (>24h)
+            </button>
+            
+            <div class="result" id="result">
+                <h3>Resultado del Chequeo</h3>
+                <div class="result-content" id="resultContent"></div>
+            </div>
+        </div>
+        
+        <script>
+            async function checkStaleOrders() {
+                const button = document.getElementById('checkButton');
+                const result = document.getElementById('result');
+                const resultContent = document.getElementById('resultContent');
+                
+                // Deshabilitar botón y mostrar loading
+                button.disabled = true;
+                button.innerHTML = '<span class="loading-spinner"></span>Ejecutando chequeo...';
+                result.classList.remove('show');
+                
+                try {
+                    const response = await fetch('/check-stale-orders');
+                    const data = await response.json();
+                    
+                    // Mostrar resultado
+                    if (data.stale_orders === 0) {
+                        resultContent.innerHTML = `
+                            <p style="color: #27ae60; font-weight: bold;">✅ Perfecto</p>
+                            <p>No hay órdenes estancadas. Todas las órdenes han sido actualizadas correctamente.</p>
+                        `;
+                    } else {
+                        resultContent.innerHTML = `
+                            <p style="color: #e74c3c; font-weight: bold;">⚠️ Órdenes Estancadas</p>
+                            <p>Se encontraron <strong>${data.stale_orders}</strong> órdenes sin actualizar en más de 24 horas.</p>
+                            <p style="margin-top: 10px; color: #666; font-size: 12px;">Revisa los logs del servidor para más detalles.</p>
+                        `;
+                    }
+                    
+                    result.classList.add('show');
+                } catch (error) {
+                    resultContent.innerHTML = `
+                        <p style="color: #e74c3c; font-weight: bold;">❌ Error</p>
+                        <p>${error.message}</p>
+                    `;
+                    result.classList.add('show');
+                } finally {
+                    // Rehabilitar botón
+                    button.disabled = false;
+                    button.innerHTML = '🔍 Chequear Órdenes Estancadas (>24h)';
+                }
+            }
+        </script>
+    </body>
+    </html>
+    """
+    return render_template_string(html)
+
+
 @app.route('/check-stale-orders', methods=['GET'])
 def check_stale_orders():
-    """Endpoint que chequea órdenes sin actualizar >24h"""
+    """Endpoint para chequear órdenes estancadas manualmente"""
     
-    logger.info("🔍 Iniciando chequeo de órdenes estancadas (>24h)...")
+    logger.info("🔍 Chequeo manual de órdenes estancadas (>24h)...")
     
     headers = {
         "X-Shopify-Access-Token": SHOPIFY_ACCESS_TOKEN,
@@ -311,7 +568,7 @@ def check_stale_orders():
         if ordenes:
             logger.info(f"⚠️ Encontradas {len(ordenes)} órdenes sin actualizar >24h")
             
-            asunto = f"⚠️ {len(ordenes)} órdenes estancadas"
+            asunto = f"⚠️ {len(ordenes)} órdenes estancadas detectadas"
             cuerpo = f"""
             <html>
                 <body style="font-family: Arial; font-size: 14px; color: #333;">
@@ -327,9 +584,7 @@ def check_stale_orders():
                 updated_at = orden['updated_at']
                 customer_email = orden['customer']['email'] if orden.get('customer') else 'Sin email'
                 
-                logger.info(f"   📋 Orden #{order_number}")
-                logger.info(f"      - Cliente: {customer_email}")
-                logger.info(f"      - Última actualización: {updated_at}")
+                logger.info(f"   📋 Orden #{order_number} - {customer_email} - Actualización: {updated_at}")
                 
                 cuerpo += f"""
                     <li>
@@ -344,7 +599,7 @@ def check_stale_orders():
                     <p style="color: red;"><strong>⚠️ Por favor, revisa estas órdenes en Shopify y Dropi.</strong></p>
                     
                     <hr>
-                    <p><small>Esta es una notificación automática de tu servidor de webhooks Amarela.</small></p>
+                    <p><small>Chequeo manual ejecutado desde dashboard.</small></p>
                 </body>
             </html>
             """
@@ -366,11 +621,11 @@ def check_stale_orders():
 @app.route('/', methods=['GET'])
 def health():
     """Endpoint de salud"""
-    logger.info("✅ Health check - Servidor activo")
     return jsonify({
         'status': 'ok',
         'message': 'Servidor de webhooks Shopify activo',
-        'shop': SHOPIFY_SHOP_URL
+        'shop': SHOPIFY_SHOP_URL,
+        'dashboard': 'https://shopify-webhooks-api.onrender.com/dashboard'
     }), 200
 
 
