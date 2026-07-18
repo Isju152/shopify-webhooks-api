@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, request, jsonify, render_template_string, send_file
 import hmac
 import hashlib
 import base64
@@ -7,9 +7,10 @@ import os
 from dotenv import load_dotenv
 import requests
 import logging
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+from twilio.rest import Client
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from io import BytesIO
 
 load_dotenv()
 
@@ -28,10 +29,12 @@ SHOPIFY_WEBHOOK_SECRET = os.getenv('SHOPIFY_WEBHOOK_SECRET')
 SHOPIFY_SHOP_URL = os.getenv('SHOPIFY_SHOP_URL')
 SHOPIFY_ACCESS_TOKEN = os.getenv('SHOPIFY_ACCESS_TOKEN')
 
-# Variables de Email
-EMAIL_USER = os.getenv('EMAIL_USER')
-EMAIL_PASSWORD = os.getenv('EMAIL_PASSWORD')
-EMAIL_RECIPIENT = os.getenv('EMAIL_RECIPIENT')
+# Variables de Twilio
+TWILIO_ACCOUNT_SID = os.getenv('TWILIO_ACCOUNT_SID')
+TWILIO_AUTH_TOKEN = os.getenv('TWILIO_AUTH_TOKEN')
+TWILIO_PHONE_FROM = os.getenv('TWILIO_PHONE_FROM')
+
+twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 
 
 def verificar_webhook(request_body, signature):
@@ -47,29 +50,161 @@ def verificar_webhook(request_body, signature):
     return hmac.compare_digest(hash_calculated, signature)
 
 
-def enviar_email(asunto, cuerpo):
-    """Envía un email de forma NO-bloqueante"""
+def enviar_sms(numero_cliente, mensaje):
+    """Envía un SMS al cliente"""
     try:
-        server = smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=5)
-        server.login(EMAIL_USER, EMAIL_PASSWORD)
+        if not numero_cliente or numero_cliente == 'None' or numero_cliente == 'Sin teléfono':
+            logger.warning(f"⚠️ Cliente sin número de teléfono válido")
+            return False
         
-        msg = MIMEMultipart()
-        msg['From'] = EMAIL_USER
-        msg['To'] = EMAIL_RECIPIENT
-        msg['Subject'] = asunto
+        # Asegurar que el número tenga formato internacional
+        if not numero_cliente.startswith('+'):
+            numero_cliente = f"+{numero_cliente}"
         
-        msg.attach(MIMEText(cuerpo, 'html'))
+        message = twilio_client.messages.create(
+            body=mensaje,
+            from_=TWILIO_PHONE_FROM,
+            to=numero_cliente
+        )
         
-        server.send_message(msg)
-        server.quit()
-        
-        logger.info(f"✉️ Email enviado: {asunto}")
+        logger.info(f"📱 SMS enviado a {numero_cliente}: {mensaje[:50]}...")
         return True
     
     except Exception as e:
-        logger.error(f"❌ Error enviando email: {e}")
-        # IMPORTANTE: Retorna False pero NO rechaza el webhook
+        logger.error(f"❌ Error enviando SMS a {numero_cliente}: {e}")
         return False
+
+
+def generar_reporte_excel_ordenes_estancadas():
+    """Genera un Excel con órdenes sin actualizar >24h"""
+    
+    logger.info("📊 Generando reporte de órdenes estancadas...")
+    
+    headers = {
+        "X-Shopify-Access-Token": SHOPIFY_ACCESS_TOKEN,
+        "Content-Type": "application/json"
+    }
+    
+    limit_time = datetime.now() - timedelta(hours=24)
+    limit_iso = limit_time.isoformat()
+    
+    url = f"https://{SHOPIFY_SHOP_URL}/admin/api/2024-01/orders.json"
+    params = {
+        "status": "any",
+        "updated_at_max": limit_iso,
+        "limit": 250
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, params=params)
+        ordenes = response.json().get('orders', [])
+        
+        # Crear workbook
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Órdenes Estancadas"
+        
+        # Estilos
+        header_fill = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
+        header_font = Font(bold=True, color="FFFFFF", size=12)
+        border = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin')
+        )
+        
+        # Encabezados
+        headers_excel = [
+            "Número Orden",
+            "Cliente",
+            "Teléfono",
+            "Email",
+            "Total",
+            "Estado Pago",
+            "Estado Envío",
+            "Última Actualización",
+            "Horas Sin Actualizar",
+            "Tags"
+        ]
+        
+        ws.append(headers_excel)
+        
+        # Aplicar estilos a encabezados
+        for cell in ws[1]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+            cell.border = border
+        
+        # Agregar datos
+        for orden in ordenes:
+            order_number = orden['order_number']
+            customer_name = orden['customer']['first_name'] if orden.get('customer') else 'Sin cliente'
+            
+            # Obtener teléfono
+            customer_phone = None
+            if orden.get('customer'):
+                customer_phone = orden['customer'].get('phone')
+            if not customer_phone:
+                customer_phone = 'Sin teléfono'
+            
+            customer_email = orden['customer'].get('email') if orden.get('customer') else 'Sin email'
+            total = orden['total_price']
+            financial_status = orden['financial_status']
+            fulfillment_status = orden['fulfillment_status']
+            updated_at = orden['updated_at']
+            tags = orden.get('tags', '')
+            
+            # Calcular horas sin actualizar
+            updated_datetime = datetime.fromisoformat(updated_at.replace('Z', '+00:00'))
+            horas_sin_actualizar = (datetime.now(updated_datetime.tzinfo) - updated_datetime).total_seconds() / 3600
+            
+            row = [
+                order_number,
+                customer_name,
+                customer_phone,
+                customer_email,
+                f"${total}",
+                financial_status,
+                fulfillment_status,
+                updated_at,
+                f"{horas_sin_actualizar:.1f}h",
+                tags
+            ]
+            
+            ws.append(row)
+            
+            # Aplicar bordes a las celdas
+            for cell in ws[ws.max_row]:
+                cell.border = border
+                cell.alignment = Alignment(horizontal='left', vertical='center')
+        
+        # Ajustar ancho de columnas
+        ws.column_dimensions['A'].width = 15
+        ws.column_dimensions['B'].width = 20
+        ws.column_dimensions['C'].width = 15
+        ws.column_dimensions['D'].width = 25
+        ws.column_dimensions['E'].width = 12
+        ws.column_dimensions['F'].width = 15
+        ws.column_dimensions['G'].width = 15
+        ws.column_dimensions['H'].width = 25
+        ws.column_dimensions['I'].width = 18
+        ws.column_dimensions['J'].width = 20
+        
+        # Guardar en memoria
+        excel_file = BytesIO()
+        wb.save(excel_file)
+        excel_file.seek(0)
+        
+        logger.info(f"✅ Reporte generado con {len(ordenes)} órdenes estancadas")
+        
+        return excel_file
+    
+    except Exception as e:
+        logger.error(f"❌ Error generando reporte: {e}")
+        return None
+
 
 @app.route('/webhooks/orders/create', methods=['POST'])
 def order_created():
@@ -81,81 +216,32 @@ def order_created():
         return 'Unauthorized', 401
     
     orden = request.get_json()
-    order_id = orden['id']
     order_number = orden['order_number']
     customer_name = orden['customer']['first_name'] if orden.get('customer') else 'Cliente'
-    customer_phone = orden['customer']['Whatsapp'] if orden.get('customer') else 'Sin Whatsapp'
+    
+    # Obtener teléfono
+    customer_phone = None
+    if orden.get('customer'):
+        customer_phone = orden['customer'].get('phone')
+    if not customer_phone:
+        customer_phone = 'Sin teléfono'
+    
     total = orden['total_price']
     financial_status = orden['financial_status']
     
-    # LOGS DETALLADOS
     logger.info("="*60)
     logger.info(f"✅ NUEVA ORDEN CREADA")
-    logger.info(f"   Id: #{order_id}")
-    # Intentar obtener teléfono del cliente
-    customer_phone = None
-    if orden.get('customer'):
-        # Opción 1: Teléfono estándar de Shopify
-        customer_phone = orden['customer'].get('phone')
-        
-        # Opción 2: Si no existe, buscar campo personalizado
-        if not customer_phone:
-            # Buscar en metafields si existe
-            metafields = orden.get('customer', {}).get('metafields', [])
-            for metafield in metafields:
-                if metafield.get('key') == 'whatsapp':
-                    customer_phone = metafield.get('value')
-                    break
-
-    # Si aún no hay teléfono
-    if not customer_phone:
-        customer_phone = 'Sin teléfono'
+    logger.info(f"   Número: #{order_number}")
     logger.info(f"   Cliente: {customer_name}")
     logger.info(f"   Teléfono: {customer_phone}")
     logger.info(f"   Total: ${total}")
     logger.info(f"   Estado de pago: {financial_status}")
     logger.info("="*60)
     
-    # ENVIAR EMAIL
-    asunto = f"🎉 Nueva Orden #{order_number}"
-    cuerpo = f"""
-    <html>
-        <body style="font-family: Arial; font-size: 14px; color: #333;">
-            <h2 style="color: #2ecc71;">¡Nueva Orden Recibida!</h2>
-            
-            <table style="width: 100%; border-collapse: collapse;">
-                <tr>
-                    <td style="padding: 10px; font-weight: bold;">Número de orden:</td>
-                    <td style="padding: 10px;">#{order_number}</td>
-                </tr>
-                <tr style="background-color: #f5f5f5;">
-                    <td style="padding: 10px; font-weight: bold;">Cliente:</td>
-                    <td style="padding: 10px;">{customer_name}</td>
-                </tr>
-                <tr>
-                    <td style="padding: 10px; font-weight: bold;">Email:</td>
-                    <td style="padding: 10px;">{customer_phone}</td>
-                </tr>
-                <tr style="background-color: #f5f5f5;">
-                    <td style="padding: 10px; font-weight: bold;">Total:</td>
-                    <td style="padding: 10px; font-size: 16px; color: #2ecc71;"><strong>${total}</strong></td>
-                </tr>
-                <tr>
-                    <td style="padding: 10px; font-weight: bold;">Estado de pago:</td>
-                    <td style="padding: 10px;">{financial_status}</td>
-                </tr>
-            </table>
-            
-            <hr style="margin: 20px 0;">
-            <p><small>Esta es una notificación automática de tu servidor de webhooks Amarela.</small></p>
-        </body>
-    </html>
-    """
+    # ENVIAR SMS AL CLIENTE
+    mensaje_sms = f"🎉 ¡Hola {customer_name}! Tu orden #{order_number} ha sido recibida. Total: ${total}. Gracias por tu compra!"
+    enviar_sms(customer_phone, mensaje_sms)
     
-    # Enviar email pero sin bloquear si falla
-    enviar_email(asunto, cuerpo)
-
-    # SIEMPRE devolver 200 OK para que Shopify no reintente
     return jsonify({'status': 'ok'}), 200
 
 
@@ -169,34 +255,23 @@ def order_updated():
         return 'Unauthorized', 401
     
     orden = request.get_json()
-    order_id = orden['id']
     order_number = orden['order_number']
     financial_status = orden['financial_status']
     fulfillment_status = orden['fulfillment_status']
-    # Intentar obtener teléfono del cliente
+    customer_name = orden['customer']['first_name'] if orden.get('customer') else 'Cliente'
+    
+    # Obtener teléfono
     customer_phone = None
     if orden.get('customer'):
-        # Opción 1: Teléfono estándar de Shopify
         customer_phone = orden['customer'].get('phone')
-        
-        # Opción 2: Si no existe, buscar campo personalizado
-        if not customer_phone:
-            # Buscar en metafields si existe
-            metafields = orden.get('customer', {}).get('metafields', [])
-            for metafield in metafields:
-                if metafield.get('key') == 'whatsapp':
-                    customer_phone = metafield.get('value')
-                    break
-
-    # Si aún no hay teléfono
     if not customer_phone:
         customer_phone = 'Sin teléfono'
+    
     total = orden['total_price']
     tags = orden.get('tags', '')
     
     logger.info("="*60)
     logger.info(f"🔄 ORDEN ACTUALIZADA")
-    logger.info(f"   Id: #{order_id}")
     logger.info(f"   Número: #{order_number}")
     logger.info(f"   Teléfono: {customer_phone}")
     logger.info(f"   Total: ${total}")
@@ -209,127 +284,35 @@ def order_updated():
     # DETECCIÓN 1: Asignado a mensajero
     if tags and 'asignado a mensajero' in tags.lower():
         logger.info(f"   🚚 ASIGNADO A MENSAJERO")
-        
-        asunto = f"🚚 Orden asignada a mensajero - #{order_number}"
-        cuerpo = f"""
-        <html>
-            <body style="font-family: Arial; font-size: 14px; color: #333;">
-                <h2 style="color: #3498db;">¡Orden Asignada a Mensajero!</h2>
-                
-                <p><strong>Número de orden:</strong> #{order_number}</p>
-                <p><strong>Cliente:</strong> {customer_phone}</p>
-                <p style="color: blue;"><strong>🚚 Tu orden ha sido asignada a un mensajero</strong></p>
-                
-                <p>Tu paquete está en proceso de entrega.</p>
-                
-                <hr>
-                <p><small>Esta es una notificación automática de tu servidor de webhooks Amarela.</small></p>
-            </body>
-        </html>
-        """
-        
-        enviar_email(asunto, cuerpo)
+        mensaje_sms = f"🚚 ¡Hola {customer_name}! Tu orden #{order_number} ha sido asignada a un mensajero. ¡Pronto llegará!"
+        enviar_sms(customer_phone, mensaje_sms)
     
     # DETECCIÓN 2: En ruta de entrega
     if tags and 'en ruta de entrega' in tags.lower():
         logger.info(f"   📍 EN RUTA DE ENTREGA")
-        
-        asunto = f"📍 Orden en ruta de entrega - #{order_number}"
-        cuerpo = f"""
-        <html>
-            <body style="font-family: Arial; font-size: 14px; color: #333;">
-                <h2 style="color: #9b59b6;">¡Tu Orden Está en Ruta!</h2>
-                
-                <p><strong>Número de orden:</strong> #{order_number}</p>
-                <p><strong>Cliente:</strong> {customer_phone}</p>
-                <p style="color: purple;"><strong>📍 Tu paquete está en ruta de entrega</strong></p>
-                
-                <p>¡Pronto llegará a tu domicilio!</p>
-                
-                <hr>
-                <p><small>Esta es una notificación automática de tu servidor de webhooks Amarela.</small></p>
-            </body>
-        </html>
-        """
-        
-        enviar_email(asunto, cuerpo)
+        mensaje_sms = f"📍 ¡Hola {customer_name}! Tu orden #{order_number} está en ruta de entrega. ¡Pronto llegará a tu domicilio!"
+        enviar_sms(customer_phone, mensaje_sms)
     
     # DETECCIÓN 3: Devolución
     if financial_status == 'refunded':
         logger.info(f"   ⚠️ DEVOLUCIÓN DETECTADA")
-        
-        asunto = f"⚠️ Devolución detectada - Orden #{order_number}"
-        cuerpo = f"""
-        <html>
-            <body style="font-family: Arial; font-size: 14px; color: #333;">
-                <h2 style="color: #e74c3c;">¡Devolución Detectada!</h2>
-                
-                <p><strong>Número de orden:</strong> #{order_number}</p>
-                <p><strong>Cliente:</strong> {customer_phone}</p>
-                <p><strong>Total:</strong> ${total}</p>
-                <p style="color: red;"><strong>⚠️ La orden ha sido reembolsada</strong></p>
-                
-                <p>Por favor, revisa el estado en Shopify y en Dropi.</p>
-                
-                <hr>
-                <p><small>Esta es una notificación automática de tu servidor de webhooks Amarela.</small></p>
-            </body>
-        </html>
-        """
-        
-        enviar_email(asunto, cuerpo)
+        mensaje_sms = f"⚠️ La orden #{order_number} ha sido reembolsada. Contacta con nosotros si tienes dudas."
+        enviar_sms(customer_phone, mensaje_sms)
     
     # DETECCIÓN 4: Pago completado
     if financial_status == 'paid':
         logger.info(f"   ✅ PAGO RECIBIDO")
-        
-        asunto = f"✅ Pago confirmado - Orden #{order_number}"
-        cuerpo = f"""
-        <html>
-            <body style="font-family: Arial; font-size: 14px; color: #333;">
-                <h2 style="color: #2ecc71;">¡Pago Confirmado!</h2>
-                
-                <p><strong>Número de orden:</strong> #{order_number}</p>
-                <p><strong>Cliente:</strong> {customer_phone}</p>
-                <p><strong>Total pagado:</strong> ${total}</p>
-                <p style="color: green;"><strong>✅ El pago ha sido procesado correctamente</strong></p>
-                
-                <p>La orden está lista para ser procesada.</p>
-                
-                <hr>
-                <p><small>Esta es una notificación automática de tu servidor de webhooks Amarela.</small></p>
-            </body>
-        </html>
-        """
-        
-        enviar_email(asunto, cuerpo)
+        mensaje_sms = f"✅ ¡Gracias {customer_name}! Tu pago de ${total} ha sido confirmado. Tu orden #{order_number} está siendo procesada."
+        enviar_sms(customer_phone, mensaje_sms)
     
     # DETECCIÓN 5: Envío completado
     if fulfillment_status == 'fulfilled':
         logger.info(f"   🎉 ENVÍO COMPLETADO")
-        
-        asunto = f"🎉 Orden entregada - #{order_number}"
-        cuerpo = f"""
-        <html>
-            <body style="font-family: Arial; font-size: 14px; color: #333;">
-                <h2 style="color: #2ecc71;">¡Orden Entregada!</h2>
-                
-                <p><strong>Número de orden:</strong> #{order_number}</p>
-                <p><strong>Cliente:</strong> {customer_phone}</p>
-                <p style="color: green;"><strong>🎉 Tu orden ha sido completamente entregada</strong></p>
-                
-                <p>¡Gracias por tu compra!</p>
-                
-                <hr>
-                <p><small>Esta es una notificación automática de tu servidor de webhooks Amarela.</small></p>
-            </body>
-        </html>
-        """
-        
-        enviar_email(asunto, cuerpo)
+        mensaje_sms = f"🎉 ¡Hola {customer_name}! Tu orden #{order_number} ha sido entregada. ¡Gracias por tu compra!"
+        enviar_sms(customer_phone, mensaje_sms)
     
-    # SIEMPRE devolver 200 OK
     return jsonify({'status': 'ok'}), 200
+
 
 @app.route('/webhooks/refunds/create', methods=['POST'])
 def refund_created():
@@ -349,33 +332,78 @@ def refund_created():
     logger.info(f"   Monto: ${monto}")
     logger.info("="*60)
     
-    asunto = f"💰 Reembolso procesado - Orden {order_id}"
-    cuerpo = f"""
-    <html>
-        <body style="font-family: Arial; font-size: 14px; color: #333;">
-            <h2 style="color: #f39c12;">Reembolso Procesado</h2>
-            
-            <p><strong>Orden:</strong> {order_id}</p>
-            <p><strong>Monto reembolsado:</strong> ${monto}</p>
-            
-            <p>El reembolso ha sido procesado correctamente.</p>
-            
-            <hr>
-            <p><small>Esta es una notificación automática de tu servidor de webhooks Amarela.</small></p>
-        </body>
-    </html>
-    """
-    
-    # Enviar email pero sin bloquear si falla
-    enviar_email(asunto, cuerpo)
-
-    # SIEMPRE devolver 200 OK para que Shopify no reintente
     return jsonify({'status': 'ok'}), 200
+
+
+@app.route('/check-stale-orders', methods=['GET'])
+def check_stale_orders():
+    """Endpoint para chequear órdenes estancadas manualmente"""
+    
+    logger.info("🔍 Chequeo manual de órdenes estancadas (>24h)...")
+    
+    headers = {
+        "X-Shopify-Access-Token": SHOPIFY_ACCESS_TOKEN,
+        "Content-Type": "application/json"
+    }
+    
+    limit_time = datetime.now() - timedelta(hours=24)
+    limit_iso = limit_time.isoformat()
+    
+    url = f"https://{SHOPIFY_SHOP_URL}/admin/api/2024-01/orders.json"
+    params = {
+        "status": "any",
+        "updated_at_max": limit_iso,
+        "limit": 250
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, params=params)
+        ordenes = response.json().get('orders', [])
+        
+        if ordenes:
+            logger.info(f"⚠️ Encontradas {len(ordenes)} órdenes sin actualizar >24h")
+            
+            for orden in ordenes:
+                order_number = orden['order_number']
+                updated_at = orden['updated_at']
+                customer_name = orden['customer']['first_name'] if orden.get('customer') else 'Sin cliente'
+                
+                logger.info(f"   📋 Orden #{order_number} - {customer_name} - Actualización: {updated_at}")
+        else:
+            logger.info("✅ Todas las órdenes actualizadas correctamente")
+        
+        return jsonify({
+            'status': 'ok',
+            'stale_orders': len(ordenes)
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"❌ Error en chequeo de órdenes: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/descargar-reporte-estancadas', methods=['GET'])
+def descargar_reporte_estancadas():
+    """Endpoint para descargar reporte de órdenes estancadas"""
+    
+    logger.info("📥 Descargando reporte de órdenes estancadas...")
+    
+    excel_file = generar_reporte_excel_ordenes_estancadas()
+    
+    if excel_file:
+        return send_file(
+            excel_file,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=f'ordenes_estancadas_{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}.xlsx'
+        )
+    else:
+        return jsonify({'error': 'Error al generar reporte'}), 500
 
 
 @app.route('/dashboard', methods=['GET'])
 def dashboard():
-    """Página con botón para chequear órdenes estancadas"""
+    """Página con botones para chequear y descargar reportes"""
     html = """
     <!DOCTYPE html>
     <html lang="es">
@@ -435,23 +463,15 @@ def dashboard():
                 color: #27ae60;
             }
             
-            .status.error {
-                border-left-color: #e74c3c;
-                background: #fadbd8;
-                color: #c0392b;
-            }
-            
-            .status.loading {
-                border-left-color: #f39c12;
-                background: #fef5e7;
-                color: #d68910;
+            .buttons-group {
+                display: flex;
+                flex-direction: column;
+                gap: 15px;
             }
             
             button {
                 width: 100%;
                 padding: 15px;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                color: white;
                 border: none;
                 border-radius: 5px;
                 font-size: 16px;
@@ -460,9 +480,19 @@ def dashboard():
                 transition: transform 0.2s, box-shadow 0.2s;
             }
             
+            .btn-check {
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+            }
+            
+            .btn-report {
+                background: linear-gradient(135deg, #27ae60 0%, #229954 100%);
+                color: white;
+            }
+            
             button:hover:not(:disabled) {
                 transform: translateY(-2px);
-                box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+                box-shadow: 0 5px 20px rgba(0, 0, 0, 0.2);
             }
             
             button:disabled {
@@ -491,8 +521,6 @@ def dashboard():
                 color: #555;
                 font-size: 14px;
                 line-height: 1.6;
-                max-height: 300px;
-                overflow-y: auto;
             }
             
             .loading-spinner {
@@ -500,7 +528,7 @@ def dashboard():
                 width: 20px;
                 height: 20px;
                 border: 3px solid #f3f3f3;
-                border-top: 3px solid #667eea;
+                border-top: 3px solid #fff;
                 border-radius: 50%;
                 animation: spin 1s linear infinite;
                 margin-right: 10px;
@@ -515,15 +543,21 @@ def dashboard():
     <body>
         <div class="container">
             <h1>📊 Dashboard Amarela</h1>
-            <p class="subtitle">Sistema de monitoreo de webhooks</p>
+            <p class="subtitle">Sistema de monitoreo de webhooks y reportes</p>
             
             <div class="status success">
                 ✅ Servidor activo y funcionando correctamente
             </div>
             
-            <button id="checkButton" onclick="checkStaleOrders()">
-                🔍 Chequear Órdenes Estancadas (>24h)
-            </button>
+            <div class="buttons-group">
+                <button class="btn-check" id="checkButton" onclick="checkStaleOrders()">
+                    🔍 Chequear Órdenes Estancadas (>24h)
+                </button>
+                
+                <button class="btn-report" onclick="descargarReporte()">
+                    📊 Descargar Reporte en Excel
+                </button>
+            </div>
             
             <div class="result" id="result">
                 <h3>Resultado del Chequeo</h3>
@@ -537,7 +571,6 @@ def dashboard():
                 const result = document.getElementById('result');
                 const resultContent = document.getElementById('resultContent');
                 
-                // Deshabilitar botón y mostrar loading
                 button.disabled = true;
                 button.innerHTML = '<span class="loading-spinner"></span>Ejecutando chequeo...';
                 result.classList.remove('show');
@@ -546,7 +579,6 @@ def dashboard():
                     const response = await fetch('/check-stale-orders');
                     const data = await response.json();
                     
-                    // Mostrar resultado
                     if (data.stale_orders === 0) {
                         resultContent.innerHTML = `
                             <p style="color: #27ae60; font-weight: bold;">✅ Perfecto</p>
@@ -556,7 +588,7 @@ def dashboard():
                         resultContent.innerHTML = `
                             <p style="color: #e74c3c; font-weight: bold;">⚠️ Órdenes Estancadas</p>
                             <p>Se encontraron <strong>${data.stale_orders}</strong> órdenes sin actualizar en más de 24 horas.</p>
-                            <p style="margin-top: 10px; color: #666; font-size: 12px;">Revisa los logs del servidor para más detalles.</p>
+                            <p style="margin-top: 10px; color: #666; font-size: 12px;">Descarga el reporte para ver más detalles.</p>
                         `;
                     }
                     
@@ -568,94 +600,27 @@ def dashboard():
                     `;
                     result.classList.add('show');
                 } finally {
-                    // Rehabilitar botón
                     button.disabled = false;
                     button.innerHTML = '🔍 Chequear Órdenes Estancadas (>24h)';
                 }
+            }
+            
+            function descargarReporte() {
+                const button = event.target;
+                button.disabled = true;
+                button.innerHTML = '<span class="loading-spinner"></span>Generando reporte...';
+                
+                setTimeout(() => {
+                    window.location.href = '/descargar-reporte-estancadas';
+                    button.disabled = false;
+                    button.innerHTML = '📊 Descargar Reporte en Excel';
+                }, 1000);
             }
         </script>
     </body>
     </html>
     """
     return render_template_string(html)
-
-
-@app.route('/check-stale-orders', methods=['GET'])
-def check_stale_orders():
-    """Endpoint para chequear órdenes estancadas manualmente"""
-    
-    logger.info("🔍 Chequeo manual de órdenes estancadas (>24h)...")
-    
-    headers = {
-        "X-Shopify-Access-Token": SHOPIFY_ACCESS_TOKEN,
-        "Content-Type": "application/json"
-    }
-    
-    limit_time = datetime.now() - timedelta(hours=24)
-    limit_iso = limit_time.isoformat()
-    
-    url = f"https://{SHOPIFY_SHOP_URL}/admin/api/2024-01/orders.json"
-    params = {
-        "status": "any",
-        "updated_at_max": limit_iso,
-        "limit": 250
-    }
-    
-    try:
-        response = requests.get(url, headers=headers, params=params)
-        ordenes = response.json().get('orders', [])
-        
-        if ordenes:
-            logger.info(f"⚠️ Encontradas {len(ordenes)} órdenes sin actualizar >24h")
-            
-            asunto = f"⚠️ {len(ordenes)} órdenes estancadas detectadas"
-            cuerpo = f"""
-            <html>
-                <body style="font-family: Arial; font-size: 14px; color: #333;">
-                    <h2 style="color: #e74c3c;">Órdenes Estancadas (>24h)</h2>
-                    
-                    <p>Se encontraron <strong>{len(ordenes)} órdenes</strong> sin actualizar hace más de 24 horas:</p>
-                    
-                    <ul>
-            """
-            
-            for orden in ordenes:
-                order_number = orden['order_number']
-                updated_at = orden['updated_at']
-                customer_email = orden['customer']['email'] if orden.get('customer') else 'Sin email'
-                
-                logger.info(f"   📋 Orden #{order_number} - {customer_email} - Actualización: {updated_at}")
-                
-                cuerpo += f"""
-                    <li>
-                        <strong>Orden #{order_number}</strong> - {customer_email}<br>
-                        Última actualización: {updated_at}
-                    </li>
-                """
-            
-            cuerpo += """
-                    </ul>
-                    
-                    <p style="color: red;"><strong>⚠️ Por favor, revisa estas órdenes en Shopify y Dropi.</strong></p>
-                    
-                    <hr>
-                    <p><small>Chequeo manual ejecutado desde dashboard.</small></p>
-                </body>
-            </html>
-            """
-            
-            enviar_email(asunto, cuerpo)
-        else:
-            logger.info("✅ Todas las órdenes actualizadas correctamente")
-        
-        return jsonify({
-            'status': 'ok',
-            'stale_orders': len(ordenes)
-        }), 200
-    
-    except Exception as e:
-        logger.error(f"❌ Error en chequeo de órdenes: {e}")
-        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/', methods=['GET'])
