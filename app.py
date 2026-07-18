@@ -32,9 +32,9 @@ SHOPIFY_SHOP_URL = os.getenv('SHOPIFY_SHOP_URL')
 SHOPIFY_ACCESS_TOKEN = os.getenv('SHOPIFY_ACCESS_TOKEN')
 
 # Variables de Email
-EMAIL_USER = os.getenv('EMAIL_USER')
-EMAIL_PASSWORD = os.getenv('EMAIL_PASSWORD')
-EMAIL_RECIPIENT = os.getenv('EMAIL_RECIPIENT')
+# EMAIL_USER = os.getenv('EMAIL_USER')
+# EMAIL_PASSWORD = os.getenv('EMAIL_PASSWORD')
+# EMAIL_RECIPIENT = os.getenv('EMAIL_RECIPIENT')
 
 
 def verificar_webhook(request_body, signature):
@@ -54,11 +54,11 @@ def enviar_email(asunto, cuerpo):
     """Envía un email con la notificación"""
     try:
         server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
-        server.login(EMAIL_USER, EMAIL_PASSWORD)
+        # server.login(EMAIL_USER, EMAIL_PASSWORD)
         
         msg = MIMEMultipart()
-        msg['From'] = EMAIL_USER
-        msg['To'] = EMAIL_RECIPIENT
+        # msg['From'] = EMAIL_USER
+        # msg['To'] = EMAIL_RECIPIENT
         msg['Subject'] = asunto
         
         msg.attach(MIMEText(cuerpo, 'html'))
