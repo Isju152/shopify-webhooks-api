@@ -92,7 +92,24 @@ def order_created():
     logger.info("="*60)
     logger.info(f"✅ NUEVA ORDEN CREADA")
     logger.info(f"   Id: #{order_id}")
-    logger.info(f"   Número: #{order_number}")
+    # Intentar obtener teléfono del cliente
+    customer_phone = None
+    if orden.get('customer'):
+        # Opción 1: Teléfono estándar de Shopify
+        customer_phone = orden['customer'].get('phone')
+        
+        # Opción 2: Si no existe, buscar campo personalizado
+        if not customer_phone:
+            # Buscar en metafields si existe
+            metafields = orden.get('customer', {}).get('metafields', [])
+            for metafield in metafields:
+                if metafield.get('key') == 'whatsapp':
+                    customer_phone = metafield.get('value')
+                    break
+
+    # Si aún no hay teléfono
+    if not customer_phone:
+        customer_phone = 'Sin teléfono'
     logger.info(f"   Cliente: {customer_name}")
     logger.info(f"   Teléfono: {customer_phone}")
     logger.info(f"   Total: ${total}")
@@ -156,7 +173,24 @@ def order_updated():
     order_number = orden['order_number']
     financial_status = orden['financial_status']
     fulfillment_status = orden['fulfillment_status']
-    customer_phone = orden['customer']['Whatsapp'] if orden.get('customer') else 'Sin Whatsapp'
+    # Intentar obtener teléfono del cliente
+    customer_phone = None
+    if orden.get('customer'):
+        # Opción 1: Teléfono estándar de Shopify
+        customer_phone = orden['customer'].get('phone')
+        
+        # Opción 2: Si no existe, buscar campo personalizado
+        if not customer_phone:
+            # Buscar en metafields si existe
+            metafields = orden.get('customer', {}).get('metafields', [])
+            for metafield in metafields:
+                if metafield.get('key') == 'whatsapp':
+                    customer_phone = metafield.get('value')
+                    break
+
+    # Si aún no hay teléfono
+    if not customer_phone:
+        customer_phone = 'Sin teléfono'
     total = orden['total_price']
     tags = orden.get('tags', '')
     
