@@ -7,6 +7,9 @@ import os
 from dotenv import load_dotenv
 import requests
 import logging
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from io import BytesIO
@@ -28,6 +31,11 @@ SHOPIFY_WEBHOOK_SECRET = os.getenv('SHOPIFY_WEBHOOK_SECRET')
 SHOPIFY_SHOP_URL = os.getenv('SHOPIFY_SHOP_URL')
 SHOPIFY_ACCESS_TOKEN = os.getenv('SHOPIFY_ACCESS_TOKEN')
 
+# Variables de Email
+EMAIL_USER = os.getenv('EMAIL_USER')
+EMAIL_PASSWORD = os.getenv('EMAIL_PASSWORD')
+EMAIL_RECIPIENT = os.getenv('EMAIL_RECIPIENT')
+
 
 def verificar_webhook(request_body, signature):
     """Verifica que el webhook sea legítimo de Shopify"""
@@ -40,6 +48,30 @@ def verificar_webhook(request_body, signature):
     ).decode()
     
     return hmac.compare_digest(hash_calculated, signature)
+
+
+def enviar_email(asunto, cuerpo):
+    """Envía un email con la notificación"""
+    try:
+        server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
+        server.login(EMAIL_USER, EMAIL_PASSWORD)
+        
+        msg = MIMEMultipart()
+        msg['From'] = EMAIL_USER
+        msg['To'] = EMAIL_RECIPIENT
+        msg['Subject'] = asunto
+        
+        msg.attach(MIMEText(cuerpo, 'html'))
+        
+        server.send_message(msg)
+        server.quit()
+        
+        logger.info(f"✉️ Email enviado: {asunto}")
+        return True
+    
+    except Exception as e:
+        logger.error(f"❌ Error enviando email: {e}")
+        return False
 
 
 def generar_reporte_excel_ordenes_estancadas():
@@ -185,6 +217,7 @@ def order_created():
     orden = request.get_json()
     order_number = orden['order_number']
     customer_name = orden['customer']['first_name'] if orden.get('customer') else 'Cliente'
+    customer_email = orden['customer']['email'] if orden.get('customer') else 'Sin email'
     
     # Obtener teléfono
     customer_phone = None
@@ -201,9 +234,52 @@ def order_created():
     logger.info(f"   Número: #{order_number}")
     logger.info(f"   Cliente: {customer_name}")
     logger.info(f"   Teléfono: {customer_phone}")
+    logger.info(f"   Email: {customer_email}")
     logger.info(f"   Total: ${total}")
     logger.info(f"   Estado de pago: {financial_status}")
     logger.info("="*60)
+    
+    # ENVIAR EMAIL
+    asunto = f"🎉 Nueva Orden #{order_number}"
+    cuerpo = f"""
+    <html>
+        <body style="font-family: Arial; font-size: 14px; color: #333;">
+            <h2 style="color: #2ecc71;">¡Nueva Orden Recibida!</h2>
+            
+            <table style="width: 100%; border-collapse: collapse;">
+                <tr>
+                    <td style="padding: 10px; font-weight: bold;">Número de orden:</td>
+                    <td style="padding: 10px;">#{order_number}</td>
+                </tr>
+                <tr style="background-color: #f5f5f5;">
+                    <td style="padding: 10px; font-weight: bold;">Cliente:</td>
+                    <td style="padding: 10px;">{customer_name}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px; font-weight: bold;">Email:</td>
+                    <td style="padding: 10px;">{customer_email}</td>
+                </tr>
+                <tr style="background-color: #f5f5f5;">
+                    <td style="padding: 10px; font-weight: bold;">Teléfono:</td>
+                    <td style="padding: 10px;">{customer_phone}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 10px; font-weight: bold;">Total:</td>
+                    <td style="padding: 10px; font-size: 16px; color: #2ecc71;"><strong>${total}</strong></td>
+                </tr>
+                <tr style="background-color: #f5f5f5;">
+                    <td style="padding: 10px; font-weight: bold;">Estado de pago:</td>
+                    <td style="padding: 10px;">{financial_status}</td>
+                </tr>
+            </table>
+            
+            <hr style="margin: 20px 0;">
+            <p><small>Esta es una notificación automática de tu servidor de webhooks Amarela.</small></p>
+        </body>
+    </html>
+    """
+    
+    enviar_email(asunto, cuerpo)
     
     return jsonify({'status': 'ok'}), 200
 
@@ -222,6 +298,7 @@ def order_updated():
     financial_status = orden['financial_status']
     fulfillment_status = orden['fulfillment_status']
     customer_name = orden['customer']['first_name'] if orden.get('customer') else 'Cliente'
+    customer_email = orden['customer']['email'] if orden.get('customer') else 'Sin email'
     
     # Obtener teléfono
     customer_phone = None
@@ -237,6 +314,7 @@ def order_updated():
     logger.info(f"🔄 ORDEN ACTUALIZADA")
     logger.info(f"   Número: #{order_number}")
     logger.info(f"   Teléfono: {customer_phone}")
+    logger.info(f"   Email: {customer_email}")
     logger.info(f"   Total: ${total}")
     logger.info(f"   Estado de pago: {financial_status}")
     logger.info(f"   Estado de envío: {fulfillment_status}")
@@ -247,22 +325,124 @@ def order_updated():
     # DETECCIÓN 1: Asignado a mensajero
     if tags and 'asignado a mensajero' in tags.lower():
         logger.info(f"   🚚 ASIGNADO A MENSAJERO - Cliente: {customer_name}")
+        
+        asunto = f"🚚 Orden asignada a mensajero - #{order_number}"
+        cuerpo = f"""
+        <html>
+            <body style="font-family: Arial; font-size: 14px; color: #333;">
+                <h2 style="color: #3498db;">¡Orden Asignada a Mensajero!</h2>
+                
+                <p><strong>Número de orden:</strong> #{order_number}</p>
+                <p><strong>Cliente:</strong> {customer_name}</p>
+                <p style="color: blue;"><strong>🚚 Tu orden ha sido asignada a un mensajero</strong></p>
+                
+                <p>Tu paquete está en proceso de entrega.</p>
+                
+                <hr>
+                <p><small>Esta es una notificación automática de tu servidor de webhooks Amarela.</small></p>
+            </body>
+        </html>
+        """
+        
+        enviar_email(asunto, cuerpo)
     
     # DETECCIÓN 2: En ruta de entrega
     if tags and 'en ruta de entrega' in tags.lower():
         logger.info(f"   📍 EN RUTA DE ENTREGA - Cliente: {customer_name}")
+        
+        asunto = f"📍 Orden en ruta de entrega - #{order_number}"
+        cuerpo = f"""
+        <html>
+            <body style="font-family: Arial; font-size: 14px; color: #333;">
+                <h2 style="color: #9b59b6;">¡Tu Orden Está en Ruta!</h2>
+                
+                <p><strong>Número de orden:</strong> #{order_number}</p>
+                <p><strong>Cliente:</strong> {customer_name}</p>
+                <p style="color: purple;"><strong>📍 Tu paquete está en ruta de entrega</strong></p>
+                
+                <p>¡Pronto llegará a tu domicilio!</p>
+                
+                <hr>
+                <p><small>Esta es una notificación automática de tu servidor de webhooks Amarela.</small></p>
+            </body>
+        </html>
+        """
+        
+        enviar_email(asunto, cuerpo)
     
     # DETECCIÓN 3: Devolución
     if financial_status == 'refunded':
         logger.info(f"   ⚠️ DEVOLUCIÓN DETECTADA - Cliente: {customer_name}")
+        
+        asunto = f"⚠️ Devolución detectada - Orden #{order_number}"
+        cuerpo = f"""
+        <html>
+            <body style="font-family: Arial; font-size: 14px; color: #333;">
+                <h2 style="color: #e74c3c;">¡Devolución Detectada!</h2>
+                
+                <p><strong>Número de orden:</strong> #{order_number}</p>
+                <p><strong>Cliente:</strong> {customer_name}</p>
+                <p><strong>Total:</strong> ${total}</p>
+                <p style="color: red;"><strong>⚠️ La orden ha sido reembolsada</strong></p>
+                
+                <p>Por favor, revisa el estado en Shopify y en Dropi.</p>
+                
+                <hr>
+                <p><small>Esta es una notificación automática de tu servidor de webhooks Amarela.</small></p>
+            </body>
+        </html>
+        """
+        
+        enviar_email(asunto, cuerpo)
     
     # DETECCIÓN 4: Pago completado
     if financial_status == 'paid':
         logger.info(f"   ✅ PAGO RECIBIDO - Cliente: {customer_name}")
+        
+        asunto = f"✅ Pago confirmado - Orden #{order_number}"
+        cuerpo = f"""
+        <html>
+            <body style="font-family: Arial; font-size: 14px; color: #333;">
+                <h2 style="color: #2ecc71;">¡Pago Confirmado!</h2>
+                
+                <p><strong>Número de orden:</strong> #{order_number}</p>
+                <p><strong>Cliente:</strong> {customer_name}</p>
+                <p><strong>Total pagado:</strong> ${total}</p>
+                <p style="color: green;"><strong>✅ El pago ha sido procesado correctamente</strong></p>
+                
+                <p>La orden está lista para ser procesada.</p>
+                
+                <hr>
+                <p><small>Esta es una notificación automática de tu servidor de webhooks Amarela.</small></p>
+            </body>
+        </html>
+        """
+        
+        enviar_email(asunto, cuerpo)
     
     # DETECCIÓN 5: Envío completado
     if fulfillment_status == 'fulfilled':
         logger.info(f"   🎉 ENVÍO COMPLETADO - Cliente: {customer_name}")
+        
+        asunto = f"🎉 Orden entregada - #{order_number}"
+        cuerpo = f"""
+        <html>
+            <body style="font-family: Arial; font-size: 14px; color: #333;">
+                <h2 style="color: #2ecc71;">¡Orden Entregada!</h2>
+                
+                <p><strong>Número de orden:</strong> #{order_number}</p>
+                <p><strong>Cliente:</strong> {customer_name}</p>
+                <p style="color: green;"><strong>🎉 Tu orden ha sido completamente entregada</strong></p>
+                
+                <p>¡Gracias por tu compra!</p>
+                
+                <hr>
+                <p><small>Esta es una notificación automática de tu servidor de webhooks Amarela.</small></p>
+            </body>
+        </html>
+        """
+        
+        enviar_email(asunto, cuerpo)
     
     return jsonify({'status': 'ok'}), 200
 
