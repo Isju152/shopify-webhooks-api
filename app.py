@@ -84,16 +84,17 @@ def order_created():
     order_id = orden['id']
     order_number = orden['order_number']
     customer_name = orden['customer']['first_name'] if orden.get('customer') else 'Cliente'
-    customer_email = orden['customer']['email'] if orden.get('customer') else 'Sin email'
+    customer_phone = orden['customer']['Whatsapp'] if orden.get('customer') else 'Sin Whatsapp'
     total = orden['total_price']
     financial_status = orden['financial_status']
     
     # LOGS DETALLADOS
     logger.info("="*60)
     logger.info(f"✅ NUEVA ORDEN CREADA")
+    logger.info(f"   Id: #{order_id}")
     logger.info(f"   Número: #{order_number}")
     logger.info(f"   Cliente: {customer_name}")
-    logger.info(f"   Email: {customer_email}")
+    logger.info(f"   Teléfono: {customer_phone}")
     logger.info(f"   Total: ${total}")
     logger.info(f"   Estado de pago: {financial_status}")
     logger.info("="*60)
@@ -116,7 +117,7 @@ def order_created():
                 </tr>
                 <tr>
                     <td style="padding: 10px; font-weight: bold;">Email:</td>
-                    <td style="padding: 10px;">{customer_email}</td>
+                    <td style="padding: 10px;">{customer_phone}</td>
                 </tr>
                 <tr style="background-color: #f5f5f5;">
                     <td style="padding: 10px; font-weight: bold;">Total:</td>
@@ -155,14 +156,15 @@ def order_updated():
     order_number = orden['order_number']
     financial_status = orden['financial_status']
     fulfillment_status = orden['fulfillment_status']
-    customer_email = orden['customer']['email'] if orden.get('customer') else 'Sin email'
+    customer_phone = orden['customer']['Whatsapp'] if orden.get('customer') else 'Sin Whatsapp'
     total = orden['total_price']
     tags = orden.get('tags', '')
     
     logger.info("="*60)
     logger.info(f"🔄 ORDEN ACTUALIZADA")
+    logger.info(f"   Id: #{order_id}")
     logger.info(f"   Número: #{order_number}")
-    logger.info(f"   Email: {customer_email}")
+    logger.info(f"   Teléfono: {customer_phone}")
     logger.info(f"   Total: ${total}")
     logger.info(f"   Estado de pago: {financial_status}")
     logger.info(f"   Estado de envío: {fulfillment_status}")
@@ -171,7 +173,7 @@ def order_updated():
     logger.info("="*60)
     
     # DETECCIÓN 1: Asignado a mensajero
-    if 'asignado a mensajero' in tags.lower():
+    if tags and 'asignado a mensajero' in tags.lower():
         logger.info(f"   🚚 ASIGNADO A MENSAJERO")
         
         asunto = f"🚚 Orden asignada a mensajero - #{order_number}"
@@ -181,7 +183,7 @@ def order_updated():
                 <h2 style="color: #3498db;">¡Orden Asignada a Mensajero!</h2>
                 
                 <p><strong>Número de orden:</strong> #{order_number}</p>
-                <p><strong>Cliente:</strong> {customer_email}</p>
+                <p><strong>Cliente:</strong> {customer_phone}</p>
                 <p style="color: blue;"><strong>🚚 Tu orden ha sido asignada a un mensajero</strong></p>
                 
                 <p>Tu paquete está en proceso de entrega.</p>
@@ -192,14 +194,10 @@ def order_updated():
         </html>
         """
         
-        # Enviar email pero sin bloquear si falla
         enviar_email(asunto, cuerpo)
-
-        # SIEMPRE devolver 200 OK para que Shopify no reintente
-        return jsonify({'status': 'ok'}), 200
-
+    
     # DETECCIÓN 2: En ruta de entrega
-    if 'en ruta de entrega' in tags.lower():
+    if tags and 'en ruta de entrega' in tags.lower():
         logger.info(f"   📍 EN RUTA DE ENTREGA")
         
         asunto = f"📍 Orden en ruta de entrega - #{order_number}"
@@ -209,7 +207,7 @@ def order_updated():
                 <h2 style="color: #9b59b6;">¡Tu Orden Está en Ruta!</h2>
                 
                 <p><strong>Número de orden:</strong> #{order_number}</p>
-                <p><strong>Cliente:</strong> {customer_email}</p>
+                <p><strong>Cliente:</strong> {customer_phone}</p>
                 <p style="color: purple;"><strong>📍 Tu paquete está en ruta de entrega</strong></p>
                 
                 <p>¡Pronto llegará a tu domicilio!</p>
@@ -220,11 +218,7 @@ def order_updated():
         </html>
         """
         
-        # Enviar email pero sin bloquear si falla
         enviar_email(asunto, cuerpo)
-
-        # SIEMPRE devolver 200 OK para que Shopify no reintente
-        return jsonify({'status': 'ok'}), 200
     
     # DETECCIÓN 3: Devolución
     if financial_status == 'refunded':
@@ -237,7 +231,7 @@ def order_updated():
                 <h2 style="color: #e74c3c;">¡Devolución Detectada!</h2>
                 
                 <p><strong>Número de orden:</strong> #{order_number}</p>
-                <p><strong>Cliente:</strong> {customer_email}</p>
+                <p><strong>Cliente:</strong> {customer_phone}</p>
                 <p><strong>Total:</strong> ${total}</p>
                 <p style="color: red;"><strong>⚠️ La orden ha sido reembolsada</strong></p>
                 
@@ -249,11 +243,7 @@ def order_updated():
         </html>
         """
         
-        # Enviar email pero sin bloquear si falla
         enviar_email(asunto, cuerpo)
-
-        # SIEMPRE devolver 200 OK para que Shopify no reintente
-        return jsonify({'status': 'ok'}), 200
     
     # DETECCIÓN 4: Pago completado
     if financial_status == 'paid':
@@ -266,7 +256,7 @@ def order_updated():
                 <h2 style="color: #2ecc71;">¡Pago Confirmado!</h2>
                 
                 <p><strong>Número de orden:</strong> #{order_number}</p>
-                <p><strong>Cliente:</strong> {customer_email}</p>
+                <p><strong>Cliente:</strong> {customer_phone}</p>
                 <p><strong>Total pagado:</strong> ${total}</p>
                 <p style="color: green;"><strong>✅ El pago ha sido procesado correctamente</strong></p>
                 
@@ -291,7 +281,7 @@ def order_updated():
                 <h2 style="color: #2ecc71;">¡Orden Entregada!</h2>
                 
                 <p><strong>Número de orden:</strong> #{order_number}</p>
-                <p><strong>Cliente:</strong> {customer_email}</p>
+                <p><strong>Cliente:</strong> {customer_phone}</p>
                 <p style="color: green;"><strong>🎉 Tu orden ha sido completamente entregada</strong></p>
                 
                 <p>¡Gracias por tu compra!</p>
@@ -302,12 +292,10 @@ def order_updated():
         </html>
         """
         
-        # Enviar email pero sin bloquear si falla
         enviar_email(asunto, cuerpo)
-
-        # SIEMPRE devolver 200 OK para que Shopify no reintente
-        return jsonify({'status': 'ok'}), 200
-
+    
+    # SIEMPRE devolver 200 OK
+    return jsonify({'status': 'ok'}), 200
 
 @app.route('/webhooks/refunds/create', methods=['POST'])
 def refund_created():
