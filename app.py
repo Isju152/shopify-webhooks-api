@@ -7,7 +7,6 @@ import os
 from dotenv import load_dotenv
 import requests
 import logging
-from twilio.rest import Client
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from io import BytesIO
@@ -29,13 +28,6 @@ SHOPIFY_WEBHOOK_SECRET = os.getenv('SHOPIFY_WEBHOOK_SECRET')
 SHOPIFY_SHOP_URL = os.getenv('SHOPIFY_SHOP_URL')
 SHOPIFY_ACCESS_TOKEN = os.getenv('SHOPIFY_ACCESS_TOKEN')
 
-# Variables de Twilio
-TWILIO_ACCOUNT_SID = os.getenv('TWILIO_ACCOUNT_SID')
-TWILIO_AUTH_TOKEN = os.getenv('TWILIO_AUTH_TOKEN')
-TWILIO_PHONE_FROM = os.getenv('TWILIO_PHONE_FROM')
-
-twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-
 
 def verificar_webhook(request_body, signature):
     """Verifica que el webhook sea legítimo de Shopify"""
@@ -48,31 +40,6 @@ def verificar_webhook(request_body, signature):
     ).decode()
     
     return hmac.compare_digest(hash_calculated, signature)
-
-
-def enviar_sms(numero_cliente, mensaje):
-    """Envía un SMS al cliente"""
-    try:
-        if not numero_cliente or numero_cliente == 'None' or numero_cliente == 'Sin teléfono':
-            logger.warning(f"⚠️ Cliente sin número de teléfono válido")
-            return False
-        
-        # Asegurar que el número tenga formato internacional
-        if not numero_cliente.startswith('+'):
-            numero_cliente = f"+{numero_cliente}"
-        
-        message = twilio_client.messages.create(
-            body=mensaje,
-            from_=TWILIO_PHONE_FROM,
-            to=numero_cliente
-        )
-        
-        logger.info(f"📱 SMS enviado a {numero_cliente}: {mensaje[:50]}...")
-        return True
-    
-    except Exception as e:
-        logger.error(f"❌ Error enviando SMS a {numero_cliente}: {e}")
-        return False
 
 
 def generar_reporte_excel_ordenes_estancadas():
@@ -175,7 +142,7 @@ def generar_reporte_excel_ordenes_estancadas():
             
             ws.append(row)
             
-            # Aplicar bordes a las celdas
+            # Aplicar bordes
             for cell in ws[ws.max_row]:
                 cell.border = border
                 cell.alignment = Alignment(horizontal='left', vertical='center')
@@ -238,10 +205,6 @@ def order_created():
     logger.info(f"   Estado de pago: {financial_status}")
     logger.info("="*60)
     
-    # ENVIAR SMS AL CLIENTE
-    mensaje_sms = f"🎉 ¡Hola {customer_name}! Tu orden #{order_number} ha sido recibida. Total: ${total}. Gracias por tu compra!"
-    enviar_sms(customer_phone, mensaje_sms)
-    
     return jsonify({'status': 'ok'}), 200
 
 
@@ -283,33 +246,23 @@ def order_updated():
     
     # DETECCIÓN 1: Asignado a mensajero
     if tags and 'asignado a mensajero' in tags.lower():
-        logger.info(f"   🚚 ASIGNADO A MENSAJERO")
-        mensaje_sms = f"🚚 ¡Hola {customer_name}! Tu orden #{order_number} ha sido asignada a un mensajero. ¡Pronto llegará!"
-        enviar_sms(customer_phone, mensaje_sms)
+        logger.info(f"   🚚 ASIGNADO A MENSAJERO - Cliente: {customer_name}")
     
     # DETECCIÓN 2: En ruta de entrega
     if tags and 'en ruta de entrega' in tags.lower():
-        logger.info(f"   📍 EN RUTA DE ENTREGA")
-        mensaje_sms = f"📍 ¡Hola {customer_name}! Tu orden #{order_number} está en ruta de entrega. ¡Pronto llegará a tu domicilio!"
-        enviar_sms(customer_phone, mensaje_sms)
+        logger.info(f"   📍 EN RUTA DE ENTREGA - Cliente: {customer_name}")
     
     # DETECCIÓN 3: Devolución
     if financial_status == 'refunded':
-        logger.info(f"   ⚠️ DEVOLUCIÓN DETECTADA")
-        mensaje_sms = f"⚠️ La orden #{order_number} ha sido reembolsada. Contacta con nosotros si tienes dudas."
-        enviar_sms(customer_phone, mensaje_sms)
+        logger.info(f"   ⚠️ DEVOLUCIÓN DETECTADA - Cliente: {customer_name}")
     
     # DETECCIÓN 4: Pago completado
     if financial_status == 'paid':
-        logger.info(f"   ✅ PAGO RECIBIDO")
-        mensaje_sms = f"✅ ¡Gracias {customer_name}! Tu pago de ${total} ha sido confirmado. Tu orden #{order_number} está siendo procesada."
-        enviar_sms(customer_phone, mensaje_sms)
+        logger.info(f"   ✅ PAGO RECIBIDO - Cliente: {customer_name}")
     
     # DETECCIÓN 5: Envío completado
     if fulfillment_status == 'fulfilled':
-        logger.info(f"   🎉 ENVÍO COMPLETADO")
-        mensaje_sms = f"🎉 ¡Hola {customer_name}! Tu orden #{order_number} ha sido entregada. ¡Gracias por tu compra!"
-        enviar_sms(customer_phone, mensaje_sms)
+        logger.info(f"   🎉 ENVÍO COMPLETADO - Cliente: {customer_name}")
     
     return jsonify({'status': 'ok'}), 200
 
