@@ -48,9 +48,9 @@ def verificar_webhook(request_body, signature):
 
 
 def enviar_email(asunto, cuerpo):
-    """Envía un email con la notificación"""
+    """Envía un email de forma NO-bloqueante"""
     try:
-        server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
+        server = smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=5)
         server.login(EMAIL_USER, EMAIL_PASSWORD)
         
         msg = MIMEMultipart()
@@ -68,8 +68,8 @@ def enviar_email(asunto, cuerpo):
     
     except Exception as e:
         logger.error(f"❌ Error enviando email: {e}")
+        # IMPORTANTE: Retorna False pero NO rechaza el webhook
         return False
-
 
 @app.route('/webhooks/orders/create', methods=['POST'])
 def order_created():
@@ -134,8 +134,10 @@ def order_created():
     </html>
     """
     
+    # Enviar email pero sin bloquear si falla
     enviar_email(asunto, cuerpo)
-    
+
+    # SIEMPRE devolver 200 OK para que Shopify no reintente
     return jsonify({'status': 'ok'}), 200
 
 
@@ -190,7 +192,11 @@ def order_updated():
         </html>
         """
         
+        # Enviar email pero sin bloquear si falla
         enviar_email(asunto, cuerpo)
+
+        # SIEMPRE devolver 200 OK para que Shopify no reintente
+        return jsonify({'status': 'ok'}), 200
 
     # DETECCIÓN 2: En ruta de entrega
     if 'en ruta de entrega' in tags.lower():
@@ -214,7 +220,11 @@ def order_updated():
         </html>
         """
         
+        # Enviar email pero sin bloquear si falla
         enviar_email(asunto, cuerpo)
+
+        # SIEMPRE devolver 200 OK para que Shopify no reintente
+        return jsonify({'status': 'ok'}), 200
     
     # DETECCIÓN 3: Devolución
     if financial_status == 'refunded':
@@ -239,7 +249,11 @@ def order_updated():
         </html>
         """
         
+        # Enviar email pero sin bloquear si falla
         enviar_email(asunto, cuerpo)
+
+        # SIEMPRE devolver 200 OK para que Shopify no reintente
+        return jsonify({'status': 'ok'}), 200
     
     # DETECCIÓN 4: Pago completado
     if financial_status == 'paid':
@@ -288,9 +302,11 @@ def order_updated():
         </html>
         """
         
+        # Enviar email pero sin bloquear si falla
         enviar_email(asunto, cuerpo)
-    
-    return jsonify({'status': 'ok'}), 200
+
+        # SIEMPRE devolver 200 OK para que Shopify no reintente
+        return jsonify({'status': 'ok'}), 200
 
 
 @app.route('/webhooks/refunds/create', methods=['POST'])
@@ -328,8 +344,10 @@ def refund_created():
     </html>
     """
     
+    # Enviar email pero sin bloquear si falla
     enviar_email(asunto, cuerpo)
-    
+
+    # SIEMPRE devolver 200 OK para que Shopify no reintente
     return jsonify({'status': 'ok'}), 200
 
 
