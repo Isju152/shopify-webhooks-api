@@ -35,9 +35,7 @@ DROPI_TOKEN = os.getenv('DROPI_TOKEN') # Nuevo Token de Dropi
 
 def obtener_ordenes_dropi():
     """Se conecta a Dropi y trae las órdenes recientes"""
-    # NOTA: La URL exacta de la API puede variar dependiendo si usas Dropi Colombia, México, etc.
-    # Generalmente es api.dropi.co o similar. Revisa la doc de Dropi para la URL exacta.
-    url = "https://api.dropi.mx/api/orders" # <-- AJUSTA ESTA URL a la de tu país si es necesario
+    url = "https://api.dropi.mx/api/orders" # <-- Confirma si usas Dropi México (.mx) o Colombia (.co)
     
     headers = {
         "Authorization": f"Bearer {DROPI_TOKEN}",
@@ -45,10 +43,26 @@ def obtener_ordenes_dropi():
     }
     
     try:
+        logger.info("📡 Conectando a Dropi...")
         response = requests.get(url, headers=headers)
+        
+        # ¡ESTO ES LA CLAVE! Imprimimos el código de estado y el texto crudo que nos da Dropi
+        logger.info(f"📊 STATUS DROPI: {response.status_code}")
+        logger.info(f"📝 TEXTO DROPI: {response.text[:300]}") # Imprime los primeros 300 caracteres
+        
         response.raise_for_status()
-        # Dropi suele devolver la data dentro de un objeto 'data'
-        return response.json().get('data', [])
+        data_json = response.json()
+        
+        # Manejo dinámico de listas: Si Dropi manda lista directa, 'data' o 'objects'
+        if isinstance(data_json, list):
+            return data_json
+        elif 'data' in data_json:
+            return data_json['data']
+        elif 'objects' in data_json:
+            return data_json['objects']
+        else:
+            return []
+            
     except Exception as e:
         logger.error(f"❌ Error conectando con Dropi: {e}")
         return []
@@ -236,6 +250,12 @@ def dashboard():
                 try {
                     const response = await fetch('/check-stale-orders');
                     const data = await response.json();
+                    
+                    if (!response.ok) {
+                        resultContent.innerHTML = `<p style="color: red;">❌ Error: ${data.error}</p>`;
+                        result.classList.add('show');
+                        return;
+                    }
                     
                     if (data.stale_orders === 0) {
                         resultContent.innerHTML = `<p style="color: green;">✅ Todo fluyendo. No hay órdenes estancadas.</p>`;
