@@ -34,26 +34,39 @@ DROPI_TOKEN = os.getenv('DROPI_TOKEN') # Nuevo Token de Dropi
 # ==========================================
 
 def obtener_ordenes_dropi():
-    """Se conecta a la API oficial de Dropi usando el token de integración"""
+    """Se conecta a Dropi usando el token de LocalStorage extraído del navegador"""
     
-    # 1. Endpoint oficial de la API para consultar órdenes
-    url = "https://api.dropi.mx/api/orders"
+    if not DROPI_TOKEN:
+        logger.error("❌ No se encontró la variable DROPI_TOKEN en el entorno.")
+        return []
+
+    # 1. Rango de fechas dinámico (últimos 30 días)
+    hoy = datetime.now()
+    hace_30_dias = hoy - timedelta(days=30)
+    str_hoy = hoy.strftime('%Y-%m-%d')
+    str_pasado = hace_30_dias.strftime('%Y-%m-%d')
+
+    # 2. La ruta exacta del panel interno de Dropi
+    url = "https://api.dropi.mx/api/orders/myorders"
     
-    # 2. Encabezados con el Token de Integración
+    # 3. Parámetros de la consulta
+    params = {
+        "orderBy": "id",
+        "orderDirection": "desc",
+        "result_number": 1000,
+        "start": 0,
+        "user_id": 136493,
+        "from": str_pasado,
+        "until": str_hoy
+    }
+    
     headers = {
-        "Authorization": f"Bearer {DROPI_TOKEN}",
-        "Content-Type": "application/json",
+        "Authorization": f"Bearer {DROPI_TOKEN.strip()}",
         "Accept": "application/json"
     }
     
-    # 3. Parámetros para listar las órdenes (ajusta según la paginación requerida)
-    params = {
-        "limit": 1000,
-        "page": 1
-    }
-    
     try:
-        logger.info("📡 Conectando a la API Oficial de Dropi...")
+        logger.info("📡 Conectando a Dropi (/api/orders/myorders) con Token de Sesión...")
         response = requests.get(url, headers=headers, params=params)
         
         logger.info(f"📊 STATUS DROPI: {response.status_code}")
@@ -62,16 +75,13 @@ def obtener_ordenes_dropi():
         response.raise_for_status()
         data_json = response.json()
         
-        # Extracción flexible de los datos según la respuesta de la API
         if isinstance(data_json, list):
             return data_json
         elif isinstance(data_json, dict):
-            if 'data' in data_json:
-                return data_json['data']
-            elif 'objects' in data_json:
+            if 'objects' in data_json:
                 return data_json['objects']
-            elif 'orders' in data_json:
-                return data_json['orders']
+            elif 'data' in data_json:
+                return data_json['data']
         
         return []
             
