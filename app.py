@@ -34,8 +34,28 @@ DROPI_TOKEN = os.getenv('DROPI_TOKEN') # Nuevo Token de Dropi
 # ==========================================
 
 def obtener_ordenes_dropi():
-    """Se conecta a Dropi y trae las órdenes recientes"""
-    url = "https://api.dropi.mx/api/orders" # <-- Confirma si usas Dropi México (.mx) o Colombia (.co)
+    """Se conecta a Dropi y trae las órdenes recientes usando la URL descubierta"""
+    
+    # 1. Calculamos fechas dinámicas para revisar siempre los últimos 30 días
+    hoy = datetime.now()
+    hace_30_dias = hoy - timedelta(days=30)
+    
+    str_hoy = hoy.strftime('%Y-%m-%d')
+    str_pasado = hace_30_dias.strftime('%Y-%m-%d')
+
+    # 2. La ruta exacta que descubriste
+    url = "https://api.dropi.mx/api/orders/myorders"
+    
+    # 3. Los parámetros limpios (aumentando el límite a 300 pedidos de golpe)
+    params = {
+        "orderBy": "id",
+        "orderDirection": "desc",
+        "result_number": 1000,  
+        "start": 0,
+        "user_id": 136493,     # Tu ID exacto
+        "from": str_pasado,
+        "until": str_hoy
+    }
     
     headers = {
         "Authorization": f"Bearer {DROPI_TOKEN}",
@@ -43,17 +63,17 @@ def obtener_ordenes_dropi():
     }
     
     try:
-        logger.info("📡 Conectando a Dropi...")
-        response = requests.get(url, headers=headers)
+        logger.info("📡 Conectando a la nueva ruta de Dropi...")
+        # Ahora usamos 'params=params' para que requests arme la URL perfecta
+        response = requests.get(url, headers=headers, params=params)
         
-        # ¡ESTO ES LA CLAVE! Imprimimos el código de estado y el texto crudo que nos da Dropi
         logger.info(f"📊 STATUS DROPI: {response.status_code}")
-        logger.info(f"📝 TEXTO DROPI: {response.text[:300]}") # Imprime los primeros 300 caracteres
+        logger.info(f"📝 TEXTO DROPI: {response.text[:300]}")
         
         response.raise_for_status()
         data_json = response.json()
         
-        # Manejo dinámico de listas: Si Dropi manda lista directa, 'data' o 'objects'
+        # Extraemos la lista donde quiera que Dropi la haya escondido
         if isinstance(data_json, list):
             return data_json
         elif 'data' in data_json:
