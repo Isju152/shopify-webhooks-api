@@ -34,22 +34,23 @@ DROPI_TOKEN = os.getenv('DROPI_TOKEN') # Nuevo Token de Dropi
 # ==========================================
 
 def obtener_ordenes_dropi():
-    """Se conecta a Dropi usando el token de LocalStorage extraído del navegador"""
+    """Se conecta a Dropi pasando filtros de seguridad y simulando un navegador real"""
     
     if not DROPI_TOKEN:
         logger.error("❌ No se encontró la variable DROPI_TOKEN en el entorno.")
         return []
 
-    # 1. Rango de fechas dinámico (últimos 30 días)
+    # 1. Limpieza estricta del token (elimina espacios y comillas extra que guarda el LocalStorage)
+    token_limpio = DROPI_TOKEN.strip().strip('"').strip("'")
+
+    # 2. Rango de fechas dinámico (últimos 30 días)
     hoy = datetime.now()
     hace_30_dias = hoy - timedelta(days=30)
     str_hoy = hoy.strftime('%Y-%m-%d')
     str_pasado = hace_30_dias.strftime('%Y-%m-%d')
 
-    # 2. La ruta exacta del panel interno de Dropi
     url = "https://api.dropi.mx/api/orders/myorders"
     
-    # 3. Parámetros de la consulta
     params = {
         "orderBy": "id",
         "orderDirection": "desc",
@@ -60,13 +61,17 @@ def obtener_ordenes_dropi():
         "until": str_hoy
     }
     
+    # 3. Encabezados completos para simular un navegador web real
     headers = {
-        "Authorization": f"Bearer {DROPI_TOKEN.strip()}",
-        "Accept": "application/json"
+        "Authorization": f"Bearer {token_limpio}",
+        "Accept": "application/json, text/plain, */*",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        "Origin": "https://app.dropi.mx",
+        "Referer": "https://app.dropi.mx/"
     }
     
     try:
-        logger.info("📡 Conectando a Dropi (/api/orders/myorders) con Token de Sesión...")
+        logger.info("📡 Conectando a Dropi enviando headers de navegador real...")
         response = requests.get(url, headers=headers, params=params)
         
         logger.info(f"📊 STATUS DROPI: {response.status_code}")
