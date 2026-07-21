@@ -1,15 +1,9 @@
 from flask import Flask, request, jsonify, render_template_string, send_file
-import hmac
-import hashlib
-import base64
 from datetime import datetime, timedelta, timezone
 import os
 from dotenv import load_dotenv
 import requests
 import logging
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from io import BytesIO
@@ -26,7 +20,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Variables
-DROPI_TOKEN = os.getenv('DROPI_TOKEN') # Nuevo Token de Dropi
+DROPI_TOKEN = os.getenv('DROPI_TOKEN', "") # Nuevo Token de Dropi
 
 
 # ==========================================
