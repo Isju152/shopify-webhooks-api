@@ -34,37 +34,26 @@ DROPI_TOKEN = os.getenv('DROPI_TOKEN') # Nuevo Token de Dropi
 # ==========================================
 
 def obtener_ordenes_dropi():
-    """Se conecta a Dropi y trae las órdenes recientes usando la URL descubierta"""
+    """Se conecta a la API oficial de Dropi usando el token de integración"""
     
-    # 1. Calculamos fechas dinámicas para revisar siempre los últimos 30 días
-    hoy = datetime.now()
-    hace_30_dias = hoy - timedelta(days=30)
+    # 1. Endpoint oficial de la API para consultar órdenes
+    url = "https://api.dropi.mx/api/orders"
     
-    str_hoy = hoy.strftime('%Y-%m-%d')
-    str_pasado = hace_30_dias.strftime('%Y-%m-%d')
-
-    # 2. La ruta exacta que descubriste
-    url = "https://api.dropi.mx/api/orders/myorders"
-    
-    # 3. Los parámetros limpios (aumentando el límite a 300 pedidos de golpe)
-    params = {
-        "orderBy": "id",
-        "orderDirection": "desc",
-        "result_number": 1000,  
-        "start": 0,
-        "user_id": 136493,     # Tu ID exacto
-        "from": str_pasado,
-        "until": str_hoy
-    }
-    
+    # 2. Encabezados con el Token de Integración
     headers = {
         "Authorization": f"Bearer {DROPI_TOKEN}",
+        "Content-Type": "application/json",
         "Accept": "application/json"
     }
     
+    # 3. Parámetros para listar las órdenes (ajusta según la paginación requerida)
+    params = {
+        "limit": 1000,
+        "page": 1
+    }
+    
     try:
-        logger.info("📡 Conectando a la nueva ruta de Dropi...")
-        # Ahora usamos 'params=params' para que requests arme la URL perfecta
+        logger.info("📡 Conectando a la API Oficial de Dropi...")
         response = requests.get(url, headers=headers, params=params)
         
         logger.info(f"📊 STATUS DROPI: {response.status_code}")
@@ -73,15 +62,18 @@ def obtener_ordenes_dropi():
         response.raise_for_status()
         data_json = response.json()
         
-        # Extraemos la lista donde quiera que Dropi la haya escondido
+        # Extracción flexible de los datos según la respuesta de la API
         if isinstance(data_json, list):
             return data_json
-        elif 'data' in data_json:
-            return data_json['data']
-        elif 'objects' in data_json:
-            return data_json['objects']
-        else:
-            return []
+        elif isinstance(data_json, dict):
+            if 'data' in data_json:
+                return data_json['data']
+            elif 'objects' in data_json:
+                return data_json['objects']
+            elif 'orders' in data_json:
+                return data_json['orders']
+        
+        return []
             
     except Exception as e:
         logger.error(f"❌ Error conectando con Dropi: {e}")
