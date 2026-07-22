@@ -5,8 +5,10 @@ from dotenv import load_dotenv
 import requests
 import logging
 from openpyxl import Workbook
+import cloudscraper
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from io import BytesIO
+
 
 load_dotenv()
 
