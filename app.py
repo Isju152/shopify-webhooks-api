@@ -47,19 +47,32 @@ def obtener_ordenes_dropi():
 
     url = "https://api.dropi.mx/api/orders/myorders"
     
-    # 3. Parámetros de la consulta (SIN user_id fijo)
+    # Parámetros EXACTOS copiados de tu captura
     params = {
+        "exportAs": "orderByRow",
         "orderBy": "id",
         "orderDirection": "desc",
-        "result_number": 1000,
+        "result_number": 1000, 
         "start": 0,
+        "textToSearch": "",
+        "status": "null",
+        "supplier_id": "false",
+        "user_id": 136493,      # Regresamos tu ID
         "from": str_pasado,
-        "until": str_hoy
+        "until": str_hoy,
+        "filter_product": "undefined",
+        "haveIncidenceProcesamiento": "false",
+        "tag_id": "",
+        "warranty": "false",
+        "seller": "null",
+        "filter_date_by": "FECHA DE CREADO",
+        "invoiced": "null"
     }
     
-    # Dejamos que Cloudscraper maneje el User-Agent, solo pasamos Origin, Referer y Auth
+    # Encabezados personalizados (¡El secreto estaba en la X!)
     headers = {
-        "Authorization": f"Bearer {token_limpio}",
+        "X-Authorization": f"Bearer {token_limpio}",
+        "X-Captcha-Token": "",
         "Accept": "application/json, text/plain, */*",
         "Origin": "https://app.dropi.mx",
         "Referer": "https://app.dropi.mx/"
