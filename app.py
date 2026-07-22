@@ -71,11 +71,16 @@ def obtener_ordenes_dropi():
     
     # Encabezados personalizados (¡El secreto estaba en la X!)
     headers = {
+        "Authorization": f"Bearer {token_limpio}",
         "X-Authorization": f"Bearer {token_limpio}",
         "X-Captcha-Token": "",
         "Accept": "application/json, text/plain, */*",
         "Origin": "https://app.dropi.mx",
-        "Referer": "https://app.dropi.mx/"
+        "Referer": "https://app.dropi.mx/",
+        "User-Agent": "Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Mobile Safari/537.36",
+        "Sec-Ch-Ua": '"Opera GX";v="133", "Chromium";v="149", "Not)A;Brand";v="24"',
+        "Sec-Ch-Ua-Mobile": "?1",
+        "Sec-Ch-Ua-Platform": '"Android"'
     }
     
     try:
