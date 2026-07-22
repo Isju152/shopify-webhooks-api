@@ -30,16 +30,16 @@ DROPI_TOKEN = os.getenv('DROPI_TOKEN', "") # Nuevo Token de Dropi
 # ==========================================
 
 def obtener_ordenes_dropi():
-    """Se conecta a Dropi pasando filtros de seguridad y simulando un navegador real"""
+    """Se conecta a Dropi evadiendo firewalls con Cloudscraper"""
     
     if not DROPI_TOKEN:
         logger.error("❌ No se encontró la variable DROPI_TOKEN en el entorno.")
         return []
 
-    # 1. Limpieza estricta del token (elimina espacios y comillas extra que guarda el LocalStorage)
+    # Limpiamos el token por si acaso
     token_limpio = DROPI_TOKEN.strip().strip('"').strip("'")
 
-    # 2. Rango de fechas dinámico (últimos 30 días)
+    # Fechas (últimos 30 días)
     hoy = datetime.now()
     hace_30_dias = hoy - timedelta(days=30)
     str_hoy = hoy.strftime('%Y-%m-%d')
@@ -57,23 +57,36 @@ def obtener_ordenes_dropi():
         "until": str_hoy
     }
     
-    # 3. Encabezados completos para simular un navegador web real
+    # Dejamos que Cloudscraper maneje el User-Agent, solo pasamos Origin, Referer y Auth
     headers = {
         "Authorization": f"Bearer {token_limpio}",
         "Accept": "application/json, text/plain, */*",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
         "Origin": "https://app.dropi.mx",
         "Referer": "https://app.dropi.mx/"
     }
     
     try:
-        logger.info("📡 Conectando a Dropi enviando headers de navegador real...")
-        response = requests.get(url, headers=headers, params=params)
+        logger.info("📡 Conectando a Dropi usando Cloudscraper...")
+        
+        # 1. Creamos la instancia que simula ser Chrome en Windows
+        scraper = cloudscraper.create_scraper(
+            browser={
+                'browser': 'chrome',
+                'platform': 'windows',
+                'desktop': True
+            }
+        )
+        
+        # 2. Hacemos la petición con el scraper en vez de requests
+        response = scraper.get(url, headers=headers, params=params)
         
         logger.info(f"📊 STATUS DROPI: {response.status_code}")
         logger.info(f"📝 TEXTO DROPI: {response.text[:300]}")
         
-        response.raise_for_status()
+        if response.status_code != 200:
+            logger.error(f"❌ Error HTTP {response.status_code} al conectar con Dropi.")
+            return []
+            
         data_json = response.json()
         
         if isinstance(data_json, list):
@@ -87,7 +100,7 @@ def obtener_ordenes_dropi():
         return []
             
     except Exception as e:
-        logger.error(f"❌ Error conectando con Dropi: {e}")
+        logger.error(f"❌ Error conectando con Dropi mediante cloudscraper: {e}")
         return []
 
 def analizar_estancamiento_dropi(ordenes_dropi):
