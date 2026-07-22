@@ -47,12 +47,12 @@ def obtener_ordenes_dropi():
 
     url = "https://api.dropi.mx/api/orders/myorders"
     
+    # 3. Parámetros de la consulta (SIN user_id fijo)
     params = {
         "orderBy": "id",
         "orderDirection": "desc",
         "result_number": 1000,
         "start": 0,
-        "user_id": 136493,
         "from": str_pasado,
         "until": str_hoy
     }
